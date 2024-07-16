@@ -1,14 +1,15 @@
 
-const express = require('express')
+const express = require('express');
 const app = express();
 const cors = require('cors');
-const mongoose = require('mongoose')
-const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const moment = require('moment')
 require('dotenv').config();
 
-app.use(express.json())
-app.use(cors())
+app.use(express.json());
+app.use(cors());
 
 const DBMS_URL = process.env.DBMS_URL;
 const PORT = process.env.PORT || 5000;
@@ -16,6 +17,9 @@ const PORT = process.env.PORT || 5000;
 // importing Model 
 
 const userModel = require('./Model/userModel')
+const foodModel = require('./Model/foodsModel')
+const verifyToken = require('./Model/verifyToken');
+const trackingModel = require('./Model/trakingsModel');
 
 
 // MongoDB Connection
@@ -27,135 +31,179 @@ mongoose.connect(`${DBMS_URL}/userlogin`)
         console.log(err)
     })
 
-// Register User
+
+
+//user Registration
+
 app.post('/register', (req, res) => {
-    const userinfo = req.body
-    console.log(userinfo)
 
-    const saltRounds = 10;
+    const userData = req.body;
+    if (userData !== null) {
+        bcrypt.genSalt(10, (err, salt) => {
+            if (!err) {
+                bcrypt.hash(userData.password, salt, async (err, phash) => {
+                    if (!err) {
+                        userData.password = phash;
+                        console.log(userData.password)
 
-    bcrypt.genSalt(saltRounds, (err, salt) => {
-        if (!err) {
-            bcrypt.hash(userinfo.password, salt, async (err, phash) => {
-                if (!err) {
-                    userinfo.password = phash;
+                        try {
+                            const registerData = await userModel.create(userData)
+                            res.send(registerData)
 
-                    try {
-                        const response = await userModel.create(userinfo)
-
-                        res.send({ Message: "User Created Successful" })
+                        }
+                        catch (err) {
+                            res.status(500).send({ Message: "Filed to create user" })
+                        }
                     }
-                    catch (err) {
-                        res.status(400).send({ Message: err.message })
+                    else {
+                        res.status(500).send({ Message: "Failed to hashing password" })
 
                     }
-                }
-            })
-        }
-    })
+                })
+            }
+            else {
+                res.status(500).send({ Message: "Failed to create password" })
+            }
+        })
+    }
+    else {
+        res.status(500).send({ Message: "Filed to create user" })
+    }
+
 })
 
-// Login User
+// User Login EndPoint
 
-app.post('/login',(req,res)=>{
-    console.log(req.body)
-    const userData = req.body
-   
+app.post('/login', async (req, res) => {
 
-    userModel.findOne({email:userData.email})
-    .then((response)=>{
-        if(response!==null)
-        {
-            bcrypt.compare(userData.password, response.password,(err,result)=>{
-                if(result===true)
-                {
+    const userData = req.body;
 
-                    jwt.sign({email:userData.email},"mylogin",(err,token)=>{
-                        if(!err)
-                        {
-                            res.send({token:token})
-                            console.log(token)
-                          
-                        }
-                        else{
-                            res.status(500).send({Message:"Some Problem with token, try again"})
-                        }
+    try {
+        const userLogin = await userModel.findOne({ email: userData.email })
+        console.log("UserLogin", userLogin)
+        if (userLogin !== null) {
+            bcrypt.compare(userData.password, userLogin.password, (err, result) => {
+
+                if (result === true) {
+                    jwt.sign({ email: userData.email }, "myLogin", (err, token) => {
+                        res.send({ token: token })
 
                     })
-                   
-                  
                 }
-                else{
-                    res.status(401).send({Message: "Password is wrong"})
-        
-                   }
+                else {
+                    res.status(401).send({ Message: "Wrong Password" })
+                }
 
             })
-           
+        }
+        else {
+
+            res.status(404).send({ Message: "Email is not found" })
+
+        }
+    }
+    catch (err) {
+        res.status(404).send({ Message: "User not found" })
+    }
+})
+
+
+// Product item Creation
+
+app.post('/foods', async (req, res) => {
+
+    const foodData = req.body;
+
+    try {
+        const data = await foodModel.create(foodData)
+        res.send({ Message: "Created product successful" })
+
+    }
+    catch (err) {
+        res.status(404).send({ Message: "Foods not found" })
+    }
+})
+
+
+// Getting Products
+app.get('/foods', verifyToken, async (req, res) => {
+    try {
+        const foodData = await foodModel.find();
+        res.send(foodData)
+
+    }
+    catch (err) {
+        res.status(404).send({ Message: "foods not found" })
+    }
+})
+
+
+// Getting only one Product
+
+app.get('/foods/:name', verifyToken, async (req, res) => {
+
+    const name = req.params.name
+    try {
+        const foodData = await foodModel.find({name:{$regex:name,$options:'i'}});
+       
+        if(foodData.length!==0)
+        {
+            res.send(foodData)
         }
         else{
-            res.status(400).send({Message: "Email is wrong ,  not found email"})
+            res.status(404).send({Message:"Foods not found"})
         }
-
-        
        
-    })
-    .catch((err)=>{
-        res.send({Message:err})
-    })
+
+    }
+    catch (err) {
+        res.status(404).send({ Message: "Foods not found" })
+    }
 })
 
 
-// get EndPoint
+// Tracking adding
 
-app.get('/users',verifytoken,(req,res)=>{
+app.post('/trackings',async(req,res)=>{
+  
 
-    userModel.find()
-    .then((userData)=>{
-        res.send({Message:"User all Data",userData})
-    })
-    .catch((err)=>{
-        res.status(404).send({Message:"Not found User Data "})
-    })
-
+    const dataTrackings = req.body;
     
-})
-
-// Getting only one data
-
-app.get('/users/:id',(req,res)=>{
-
-    const userId = req.params.id
-
-
-    userModel.findOne({_id:userId})
-    .then((userData)=>{
-        res.send({Message:"Single Data",userData})
-    })
-    .catch((err)=>{
-       res.status(404).send({message:"Not found Data user",error:err.message})
-    })
-    
-
-
-})
-
-// Middleware for verify Token
-
-function verifytoken(req,res,next){
-
-   const token = req.headers.authorization.split(" ")[1];
-   jwt.verify(token,"mylogin",(err,data)=>{
-    if(!err){
+   const date = moment(new Date()).format("YYYY-MM-DD");
+    dataTrackings.eatenDate = date
+  
+    try{
+        const data = await trackingModel.create(dataTrackings)     
        
-        next()
+       res.send({Message:"Added Item"})
+
     }
-    else{
-        res.status(401).send({Message:"Invalid Token, login again"})
-    }
-   })
+    catch(err){
+        res.status(404).send({Message:"Tracking item not found"})
+    }  
     
-}
+})
+
+ // Getting Tracking data from date
+
+ app.get('/trackings/:id/:date',async(req,res)=>{
+    const id = req.params.id;
+    const date = req.params.date;
+
+    try{
+        const data = await trackingModel.find({userId:id,eatenDate:date}).populate('userId').populate('foodId')
+     
+        res.send(data)
+    }
+    catch(err){
+        res.status(404).send({Message:"Not found track report of today"})
+    }
+
+})
+
+
+
+
 
 // Server Create
 app.listen(PORT, () => {
