@@ -7,9 +7,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const moment = require('moment')
 require('dotenv').config();
+const multer = require('multer')
+const path = require('path')
 
 app.use(express.json());
 app.use(cors());
+
+app.use("/image", express.static('./image'))
 
 const DBMS_URL = process.env.DBMS_URL;
 const PORT = process.env.PORT || 5000;
@@ -19,7 +23,9 @@ const PORT = process.env.PORT || 5000;
 const userModel = require('./Model/userModel')
 const foodModel = require('./Model/foodsModel')
 const verifyToken = require('./Model/verifyToken');
-const trackingModel = require('./Model/trakingsModel');
+const trackingsModel = require('./Model/trakingsModel');
+
+
 
 
 // MongoDB Connection
@@ -44,7 +50,6 @@ app.post('/register', (req, res) => {
                 bcrypt.hash(userData.password, salt, async (err, phash) => {
                     if (!err) {
                         userData.password = phash;
-                        console.log(userData.password)
 
                         try {
                             const registerData = await userModel.create(userData)
@@ -52,7 +57,7 @@ app.post('/register', (req, res) => {
 
                         }
                         catch (err) {
-                            res.status(500).send({ Message: "Filed to create user" })
+                            res.status(500).send(err)
                         }
                     }
                     else {
@@ -80,13 +85,12 @@ app.post('/login', async (req, res) => {
 
     try {
         const userLogin = await userModel.findOne({ email: userData.email })
-        console.log("UserLogin", userLogin)
         if (userLogin !== null) {
             bcrypt.compare(userData.password, userLogin.password, (err, result) => {
 
                 if (result === true) {
                     jwt.sign({ email: userData.email }, "myLogin", (err, token) => {
-                        res.send({ token: token })
+                        res.send({ token: token, id: userLogin._id, name: userLogin.name })
 
                     })
                 }
@@ -110,18 +114,52 @@ app.post('/login', async (req, res) => {
 
 // Product item Creation
 
-app.post('/foods', async (req, res) => {
-
-    const foodData = req.body;
-
-    try {
-        const data = await foodModel.create(foodData)
-        res.send({ Message: "Created product successful" })
-
+const storage = multer.diskStorage({
+    destination: './image/',
+    filename: function (req, file, cb) {
+        cb(null, file.fieldname + '-' + Date.now() + '-' + path.extname(file.originalname));
     }
-    catch (err) {
-        res.status(404).send({ Message: "Foods not found" })
+})
+
+const upload = multer({ storage });
+
+app.post('/foods', upload.single('image'), async (req, res) => {
+    if (req.file !== undefined && req.body !== undefined) {
+        const filename = req.file.filename;
+        const { name, calories, protein, carbohydrate, fat, quantity } = req.body;
+
+
+        if (!filename || !name || !calories || !protein || !carbohydrate || !fat || !quantity) {
+            res.status(401).json({ status: 401, Message: "fill all data" })
+        }
+        else {
+            const foodData = new foodModel({
+                name: name,
+                calories: calories,
+                protein: protein,
+                carbohydrate: carbohydrate,
+                fat: fat,
+                imagepath: filename,
+                quantity: quantity,
+            })
+
+
+            try {
+                const finalData = await foodData.save();
+                res.send({ Message: "Created product successful" })
+
+            }
+            catch (err) {
+                res.status(404).send({ Message: "Foods not found", err })
+            }
+
+        }
     }
+
+    else {
+        res.status(401).json({ status: 401, Message: "fill all data in form" })
+    }
+
 })
 
 
@@ -144,16 +182,15 @@ app.get('/foods/:name', verifyToken, async (req, res) => {
 
     const name = req.params.name
     try {
-        const foodData = await foodModel.find({name:{$regex:name,$options:'i'}});
-       
-        if(foodData.length!==0)
-        {
+        const foodData = await foodModel.find({ name: { $regex: name, $options: 'i' } });
+
+        if (foodData.length !== 0) {
             res.send(foodData)
         }
-        else{
-            res.status(404).send({Message:"Foods not found"})
+        else {
+            res.status(404).send({ Message: "Foods not found" })
         }
-       
+
 
     }
     catch (err) {
@@ -164,39 +201,49 @@ app.get('/foods/:name', verifyToken, async (req, res) => {
 
 // Tracking adding
 
-app.post('/trackings',async(req,res)=>{
-  
+app.post('/trackings', verifyToken, async (req, res) => {
+
+
 
     const dataTrackings = req.body;
-    
-   const date = moment(new Date()).format("YYYY-MM-DD");
+
+    const date = moment(new Date()).format("YYYY-MM-DD");
     dataTrackings.eatenDate = date
-  
-    try{
-        const data = await trackingModel.create(dataTrackings)     
-       
-       res.send({Message:"Added Item"})
+    if (dataTrackings.length !== 0) {
+
+        try {
+            const data = await trackingsModel.create(dataTrackings)
+
+            res.send({ Message: "Track Successful" })
+
+        }
+        catch (err) {
+            res.status(404).send({ Message: "Track item not found" })
+        }
+
 
     }
-    catch(err){
-        res.status(404).send({Message:"Tracking item not found"})
-    }  
-    
+    else {
+        res.send({ Message: "fill all the data" })
+    }
+
+
+
 })
 
- // Getting Tracking data from date
+// Getting Tracking data from date
 
- app.get('/trackings/:id/:date',async(req,res)=>{
+app.get('/trackings/:id/:date', verifyToken, async (req, res) => {
     const id = req.params.id;
     const date = req.params.date;
 
-    try{
-        const data = await trackingModel.find({userId:id,eatenDate:date}).populate('userId').populate('foodId')
-     
+    try {
+        const data = await trackingsModel.find({ userId: id, eatenDate: date }).populate('userId').populate('foodId')
+
         res.send(data)
     }
-    catch(err){
-        res.status(404).send({Message:"Not found track report of today"})
+    catch (err) {
+        res.status(404).send({ Message: "Not found track report of today" })
     }
 
 })
