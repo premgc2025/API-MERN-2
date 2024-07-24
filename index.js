@@ -123,7 +123,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post('/foods', upload.single('image'), async (req, res) => {
+app.post('/foods',verifyToken, upload.single('image'), async (req, res) => {
     if (req.file !== undefined && req.body !== undefined) {
         const filename = req.file.filename;
         const { name, calories, protein, carbohydrate, fat, quantity } = req.body;
@@ -142,7 +142,6 @@ app.post('/foods', upload.single('image'), async (req, res) => {
                 imagepath: filename,
                 quantity: quantity,
             })
-
 
             try {
                 const finalData = await foodData.save();
